@@ -5,6 +5,7 @@ import SimpleITK as sitk
 import torch
 from torch.utils.data import Dataset
 import torch.nn.functional as F
+import imageio
 
 class KidneyDataset(Dataset):
     def __init__(self, root_dir, train, transform=None):
@@ -76,7 +77,6 @@ class KidneyBCDataset(Dataset):
 
         file_list = os.listdir(self.split_dir)
         file_list.sort(key=lambda x: int(x[-5:]))
-        # print(file_list)
 
         cts = []
         masks = []
@@ -133,3 +133,86 @@ class KidneyBCDataset(Dataset):
         self.transform(self.cts[idx]), self.gts[idx], torch.tensor(self.masks[idx]), torch.tensor(self.labels[idx]))
         return sample
 
+
+class LiverDataset(Dataset):
+
+    def __init__(self, root_dir, train, transform=None):
+        self.transform = transform
+        self.train = train
+        self.cts = []
+        self.gts = []
+        self.labels = []
+        self.names = []
+        #
+        if train:
+            self.split_dir = os.path.join(root_dir, 'train')
+            self.get_images_train( os.path.join(self.split_dir, "images_pngs_liver"), True)
+            self.get_images_train( os.path.join(self.split_dir, "images_pngs_noliver"), False)
+        else:
+            self.split_dir = os.path.join(root_dir, 'test')
+            self.get_images_test()
+
+        self.cts = np.array(self.cts).astype('float32')
+        self.gts = np.array(self.gts).astype('int8')
+        self.labels = np.array(self.labels).astype('float32')
+
+        print (self.cts.shape, self.gts.shape, self.labels.shape)
+        print (self.cts.dtype, self.gts.dtype, self.labels.dtype)
+        
+
+    def get_images_train(self, path, liver):
+        for idx, image_name in enumerate( sorted( os.listdir(path) )):
+            if image_name.endswith(".png"):
+                print (idx, path, image_name)
+                # image
+                full_path = os.path.join(path, image_name)
+                arr = imageio.imread(full_path)[:,:,:3] # get rid of alpha channel in pngs
+                self.cts.append(arr)
+                # gts
+                dummy = np.zeros((arr.shape[0], arr.shape[1])) # zeros here as a dummy for training data
+                self.gts.append(dummy)
+                # labels
+                if liver:
+                    self.labels.append([1])
+                else:
+                    self.labels.append([0]) 
+
+    def get_images_test(self):
+        # paths
+        images_path = os.path.join(self.split_dir, "images_pngs")
+        masks_path = os.path.join(self.split_dir, "masks_pngs")
+
+        for idx, name in enumerate( sorted( os.listdir(images_path) )):
+            if name.endswith(".png"): 
+                self.names.append(name) 
+                print (idx, name) 
+                # image
+                full_path_image = os.path.join(images_path, name)
+                arr = imageio.imread(full_path_image)[:,:,:3] # get rid of alpha channel in pngs
+                self.cts.append(arr)
+                # gts
+                full_path_label = os.path.join(masks_path, name)
+                arr = imageio.imread(full_path_label)[:,:,:3]
+                # 0==black (background), 1==white
+                grayscale_arr = 1.0 * (arr < 127)[:,:,:1]
+                grayscale_arr = np.squeeze(grayscale_arr)
+                self.gts.append(grayscale_arr)
+                # labels 
+                if len(np.unique(grayscale_arr)) == 1: # all background, no liver
+                    self.labels.append([0]) 
+                else: 
+                    self.labels.append([1])
+                # testing
+                # imageio.imwrite("/weakly-supervised-segmentation/saved/{}".format(name), grayscale_arr)
+   
+    def __len__(self):
+        return len(self.cts)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        if self.train:
+            return (self.transform(self.cts[idx]), self.gts[idx], torch.tensor(self.labels[idx]))
+        else:
+            return (self.transform(self.cts[idx]), self.gts[idx], torch.tensor(self.labels[idx]), self.names[idx])

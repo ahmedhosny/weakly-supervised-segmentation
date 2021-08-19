@@ -30,7 +30,7 @@ def main(config):
 
     # build model architecture, then print to console
     model = config.init_obj('arch', module_arch)
-    state_dict = convert_mxnet_to_torch('data/pretrained_models/ilsvrc-cls_rna-a1_cls1000_ep-0001.params')
+    state_dict = convert_mxnet_to_torch(config['weights'])
     model.load_state_dict(state_dict, strict=False)
     logger.info(model)
 
